@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const Icon = {
   Heart: () => '❤️',
@@ -6,6 +6,8 @@ const Icon = {
   RefreshCw: () => '🔄',
   Film: () => '🎬',
 };
+
+type User = 'You' | 'Partner';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w780';
 
@@ -24,17 +26,26 @@ const defaultPrefs = {
 
 export default function App() {
   const [token, setToken] = useState('');
-  const [prefs, setPrefs] = useState(defaultPrefs);
+  // prefs are read-only at build time in this minimal Netlify deploy; drop the unused setter to fix TS6133
+  const [prefs] = useState(defaultPrefs);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [state, setState] = useState({
+  const [state, setState] = useState<{
+    currentUser: User;
+    phase: 'idle' | 'round1' | 'swap' | 'round2' | 'results';
+    cohort: Array<{ id: number; title: string; overview?: string; year?: string; poster?: string | null; genre_ids: number[] }>;
+    idx: Record<User, number>;
+    likes: Record<User, Set<number>>;
+    passes: Record<User, Set<number>>;
+    agreed: number[];
+  }>({
     currentUser: 'You',
     phase: 'idle',
-    cohort: [] as any[],
+    cohort: [],
     idx: { You: 0, Partner: 0 },
     likes: { You: new Set<number>(), Partner: new Set<number>() },
     passes: { You: new Set<number>(), Partner: new Set<number>() },
-    agreed: [] as number[],
+    agreed: [],
   });
 
   const [genres, setGenres] = useState<{ id: number; name: string }[]>([]);
@@ -81,7 +92,7 @@ export default function App() {
   const act = (kind: 'like' | 'pass') => {
     const current = state.cohort[state.idx[state.currentUser]];
     if (!current) return;
-    const user = state.currentUser;
+    const user: User = state.currentUser;
     const likes = new Set(state.likes[user]);
     const passes = new Set(state.passes[user]);
     if (kind === 'like') likes.add(current.id); else passes.add(current.id);
