@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const Icon = {
   Heart: () => '❤️',
@@ -26,18 +26,17 @@ const defaultPrefs = {
 
 export default function App() {
   const [token, setToken] = useState('');
-  // prefs are read-only at build time in this minimal Netlify deploy; drop the unused setter to fix TS6133
   const [prefs] = useState(defaultPrefs);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [state, setState] = useState<{
     currentUser: User;
-    phase: 'idle' | 'round1' | 'swap' | 'round2' | 'results';
+    phase: 'idle' | 'round1' | 'swap' | 'round2' | 'review1' | 'review2' | 'final';
     cohort: Array<{ id: number; title: string; overview?: string; year?: string; poster?: string | null; genre_ids: number[] }>;
     idx: Record<User, number>;
     likes: Record<User, Set<number>>;
     passes: Record<User, Set<number>>;
-    agreed: number[];
+    agreed: number[]; // after round2 (both liked)
   }>({
     currentUser: 'You',
     phase: 'idle',
@@ -47,6 +46,9 @@ export default function App() {
     passes: { You: new Set<number>(), Partner: new Set<number>() },
     agreed: [],
   });
+
+  // Trailer review approvals
+  const [reviewYes, setReviewYes] = useState<Record<User, Set<number>>>({ You: new Set(), Partner: new Set() });
 
   const [genres, setGenres] = useState<{ id: number; name: string }[]>([]);
 
@@ -81,7 +83,8 @@ export default function App() {
         poster: m.poster_path ? TMDB_IMAGE_BASE + m.poster_path : null,
         genre_ids: m.genre_ids,
       }));
-      setState({ ...state, phase: 'round1', cohort, idx: { You: 0, Partner: 0 } });
+      setReviewYes({ You: new Set(), Partner: new Set() });
+      setState({ ...state, phase: 'round1', cohort, idx: { You: 0, Partner: 0 }, agreed: [], likes: { You: new Set(), Partner: new Set() }, passes: { You: new Set(), Partner: new Set() } });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -105,7 +108,7 @@ export default function App() {
 
     if (nextIdx >= state.cohort.length) {
       if (state.phase === 'round1') phase = 'swap';
-      else if (state.phase === 'round2') phase = 'results';
+      else if (state.phase === 'round2') phase = agreed.length ? 'review1' : 'final';
     }
 
     setState({
@@ -121,6 +124,21 @@ export default function App() {
   const handleSwap = () => {
     setState({ ...state, currentUser: 'Partner', phase: 'round2' });
   };
+
+  function handleReviewDone(user: User, yesIds: number[]) {
+    const nextReview = new Set(reviewYes[user]);
+    yesIds.forEach((id) => nextReview.add(id));
+    const updated = { ...reviewYes, [user]: nextReview };
+    setReviewYes(updated);
+    if (user === 'You') {
+      // move to partner review
+      setState((s) => ({ ...s, phase: 'review2' }));
+    } else {
+      // compute final intersection
+      const finalIds = state.agreed.filter((id) => updated.You.has(id) && updated.Partner.has(id));
+      setState((s) => ({ ...s, phase: 'final', agreed: finalIds }));
+    }
+  }
 
   const currentMovie = state.cohort[state.idx[state.currentUser]];
 
@@ -160,8 +178,22 @@ export default function App() {
             I'm the Partner → Start My Turn
           </button>
         </div>
-      ) : state.phase === 'results' ? (
-        <Results agreedIds={state.agreed} token={token} />
+      ) : state.phase === 'review1' ? (
+        <TrailerReview
+          user="You"
+          token={token}
+          ids={state.agreed}
+          onDone={(yes) => handleReviewDone('You', yes)}
+        />
+      ) : state.phase === 'review2' ? (
+        <TrailerReview
+          user="Partner"
+          token={token}
+          ids={state.agreed}
+          onDone={(yes) => handleReviewDone('Partner', yes)}
+        />
+      ) : state.phase === 'final' ? (
+        <Results agreedIds={state.agreed} token={token} heading="Final agreed picks" />
       ) : !currentMovie ? (
         <div className="text-center py-20 text-neutral-400">Click Build Deck to begin</div>
       ) : (
@@ -196,7 +228,7 @@ function Card({ movie, genres }: { movie: any; genres: { id: number; name: strin
   );
 }
 
-function Results({ agreedIds, token }: { agreedIds: number[]; token: string }) {
+function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: number[]; token: string; heading?: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [trailers, setTrailers] = useState<Record<number, string>>({});
   const [openTrailer, setOpenTrailer] = useState<number | null>(null);
@@ -238,7 +270,7 @@ function Results({ agreedIds, token }: { agreedIds: number[]; token: string }) {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-4">Agreed Picks</h2>
+      <h2 className="text-lg font-semibold mb-4">{heading} ({agreedIds.length})</h2>
       <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((m) => {
           const poster = m.poster_path ? TMDB_IMAGE_BASE + m.poster_path : null;
@@ -302,6 +334,93 @@ function Results({ agreedIds, token }: { agreedIds: number[]; token: string }) {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** Trailer review phase (one user at a time, sequential) */
+function TrailerReview({ user, token, ids, onDone }: { user: User; token: string; ids: number[]; onDone: (yesIds: number[]) => void }) {
+  const [i, setI] = useState(0);
+  const [meta, setMeta] = useState<any | null>(null);
+  const [trailer, setTrailer] = useState<string | 'none' | null>(null);
+  const [yes, setYes] = useState<number[]>([]);
+  const id = ids[i];
+
+  useEffect(() => {
+    let alive = true;
+    setMeta(null);
+    setTrailer(null);
+    if (!id) return;
+    (async () => {
+      try {
+        const m = await fetch(`https://api.themoviedb.org/3/movie/${id}?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
+        if (!alive) return;
+        setMeta(m);
+        const vres = await fetch(`https://api.themoviedb.org/3/movie/${id}/videos?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!vres.ok) throw new Error('no videos');
+        const vv = await vres.json();
+        const yt = (vv.results || []).find((v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'));
+        setTrailer(yt ? yt.key : 'none');
+      } catch {
+        if (alive) setTrailer('none');
+      }
+    })();
+    return () => { alive = false; };
+  }, [id, token]);
+
+  const next = (approve: boolean) => {
+    const picks = approve ? [...yes, id] : yes;
+    if (i + 1 >= ids.length) {
+      onDone(picks);
+    } else {
+      setYes(picks);
+      setI(i + 1);
+    }
+  };
+
+  if (!ids.length) return <div className="text-center py-20 text-neutral-400">No titles to review.</div>;
+
+  const poster = meta?.poster_path ? TMDB_IMAGE_BASE + meta.poster_path : null;
+  const youtubeUrl = trailer && trailer !== 'none'
+    ? `https://www.youtube.com/watch?v=${trailer}`
+    : `https://www.youtube.com/results?search_query=${encodeURIComponent((meta?.title || '') + ' trailer')}`;
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <h2 className="text-lg font-semibold mb-3">{user}: Trailer review {i + 1} / {ids.length}</h2>
+      <div className="p-4 rounded-2xl border border-neutral-800 bg-neutral-900/40">
+        <div className="flex gap-4">
+          {poster ? (
+            <img src={poster} alt={meta?.title} className="w-28 h-40 object-cover rounded-md border border-neutral-800" />
+          ) : (
+            <div className="w-28 h-40 rounded-md bg-neutral-800 grid place-items-center">🎞️</div>
+          )}
+          <div className="flex-1">
+            <div className="text-base font-medium mb-1">{meta?.title} {meta?.release_date ? <span className="text-neutral-400">({String(meta.release_date).slice(0,4)})</span> : null}</div>
+            <div className="text-xs text-neutral-400 mb-2">{meta?.tagline || meta?.overview}</div>
+            <div className="aspect-video w-full overflow-hidden rounded-lg border border-neutral-800 bg-black">
+              {trailer && trailer !== 'none' ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${trailer}`}
+                  title={meta?.title || 'Trailer'}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="w-full h-full"
+                />
+              ) : (
+                <div className="h-full grid place-items-center text-xs text-neutral-400 p-4 text-center">
+                  No embeddable trailer found.
+                  <div className="mt-2"><a href={youtubeUrl} target="_blank" rel="noreferrer noopener" className="underline text-blue-400 hover:text-blue-300">Open on YouTube</a></div>
+                </div>
+              )}
+            </div>
+            <div className="mt-4 flex items-center justify-center gap-4">
+              <button onClick={() => next(false)} className="w-28 h-12 rounded-2xl bg-neutral-800 hover:bg-neutral-700">{Icon.X()} No</button>
+              <button onClick={() => next(true)} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500">{Icon.Heart()} Yes</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
