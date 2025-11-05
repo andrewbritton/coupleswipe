@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
+// Simple emoji icons (no external deps)
 const Icon = {
   Heart: () => '❤️',
   X: () => '❌',
@@ -8,6 +9,15 @@ const Icon = {
 };
 
 type User = 'You' | 'Partner';
+
+type MovieLite = {
+  id: number;
+  title: string;
+  overview?: string;
+  year?: string;
+  poster?: string | null;
+  genre_ids: number[];
+};
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w780';
 
@@ -25,14 +35,15 @@ const defaultPrefs = {
 };
 
 export default function App() {
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState(() => (import.meta as any)?.env?.VITE_TMDB_TOKEN || localStorage.getItem('tmdb_v4_token') || '');
   const [prefs] = useState(defaultPrefs);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
   const [state, setState] = useState<{
     currentUser: User;
-    phase: 'idle' | 'round1' | 'swap' | 'round2' | 'review1' | 'review2' | 'final';
-    cohort: Array<{ id: number; title: string; overview?: string; year?: string; poster?: string | null; genre_ids: number[] }>;
+    phase: 'idle' | 'round1' | 'swap' | 'round2' | 'review1' | 'reviewSwap' | 'review2' | 'final' | 'winner';
+    cohort: MovieLite[];
     idx: Record<User, number>;
     likes: Record<User, Set<number>>;
     passes: Record<User, Set<number>>;
@@ -47,11 +58,14 @@ export default function App() {
     agreed: [],
   });
 
-  // Trailer review approvals
+  // Trailer review approvals (second pass)
   const [reviewYes, setReviewYes] = useState<Record<User, Set<number>>>({ You: new Set(), Partner: new Set() });
+  // Final random winner id
+  const [winnerId, setWinnerId] = useState<number | null>(null);
 
   const [genres, setGenres] = useState<{ id: number; name: string }[]>([]);
 
+  // Load genres once token is present
   useEffect(() => {
     if (!token) return;
     fetch(`https://api.themoviedb.org/3/genre/movie/list?language=${prefs.language}`, {
@@ -60,7 +74,7 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => setGenres(data.genres || []))
       .catch(() => {});
-  }, [token]);
+  }, [token, prefs.language]);
 
   const buildDeck = async () => {
     if (!token) {
@@ -75,7 +89,7 @@ export default function App() {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('TMDB fetch failed: ' + res.status);
       const data = await res.json();
-      const cohort = (data.results || []).slice(0, target).map((m: any) => ({
+      const cohort: MovieLite[] = (data.results || []).slice(0, target).map((m: any) => ({
         id: m.id,
         title: m.title,
         overview: m.overview,
@@ -84,9 +98,18 @@ export default function App() {
         genre_ids: m.genre_ids,
       }));
       setReviewYes({ You: new Set(), Partner: new Set() });
-      setState({ ...state, phase: 'round1', cohort, idx: { You: 0, Partner: 0 }, agreed: [], likes: { You: new Set(), Partner: new Set() }, passes: { You: new Set(), Partner: new Set() } });
+      setWinnerId(null);
+      setState({
+        currentUser: 'You',
+        phase: 'round1',
+        cohort,
+        idx: { You: 0, Partner: 0 },
+        likes: { You: new Set(), Partner: new Set() },
+        passes: { You: new Set(), Partner: new Set() },
+        agreed: [],
+      });
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || String(e));
     } finally {
       setLoading(false);
     }
@@ -99,11 +122,16 @@ export default function App() {
     const likes = new Set(state.likes[user]);
     const passes = new Set(state.passes[user]);
     if (kind === 'like') likes.add(current.id); else passes.add(current.id);
+
     const nextIdx = state.idx[user] + 1;
     let phase = state.phase;
     let agreed = [...state.agreed];
-    if (state.phase === 'round2' && kind === 'like' && state.likes[user === 'You' ? 'Partner' : 'You'].has(current.id)) {
-      if (!agreed.includes(current.id)) agreed.push(current.id);
+
+    if (state.phase === 'round2' && kind === 'like') {
+      const other: User = user === 'You' ? 'Partner' : 'You';
+      if (state.likes[other].has(current.id) && !agreed.includes(current.id)) {
+        agreed.push(current.id);
+      }
     }
 
     if (nextIdx >= state.cohort.length) {
@@ -130,9 +158,10 @@ export default function App() {
     yesIds.forEach((id) => nextReview.add(id));
     const updated = { ...reviewYes, [user]: nextReview };
     setReviewYes(updated);
+
     if (user === 'You') {
-      // move to partner review
-      setState((s) => ({ ...s, phase: 'review2' }));
+      // Show a clear handoff page before Partner starts their trailer review
+      setState((s) => ({ ...s, phase: 'reviewSwap' }));
     } else {
       // compute final intersection
       const finalIds = state.agreed.filter((id) => updated.You.has(id) && updated.Partner.has(id));
@@ -141,6 +170,14 @@ export default function App() {
   }
 
   const currentMovie = state.cohort[state.idx[state.currentUser]];
+
+  const randomPick = (force?: boolean) => {
+    const pool = state.agreed;
+    if (!pool.length) return;
+    const id = pool[Math.floor(Math.random() * pool.length)];
+    setWinnerId(id);
+    setState((s) => ({ ...s, phase: 'winner' }));
+  };
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
@@ -159,7 +196,7 @@ export default function App() {
           type="password"
           placeholder="Paste your TMDB v4 token here"
           value={token}
-          onChange={(e) => setToken(e.target.value)}
+          onChange={(e) => { const v = e.target.value; setToken(v); try { localStorage.setItem('tmdb_v4_token', v); } catch {} }}
           className="flex-1 px-2 py-1 rounded bg-neutral-800 text-neutral-100 border border-neutral-700"
         />
       </div>
@@ -171,41 +208,49 @@ export default function App() {
       ) : state.phase === 'swap' ? (
         <div className="text-center py-20">
           <p className="text-lg mb-4">🎬 Your turn is done! Now pass to your partner.</p>
-          <button
-            onClick={handleSwap}
-            className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white"
-          >
+          <button onClick={handleSwap} className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white">
             I'm the Partner → Start My Turn
           </button>
         </div>
       ) : state.phase === 'review1' ? (
-        <TrailerReview
-          user="You"
-          token={token}
-          ids={state.agreed}
-          onDone={(yes) => handleReviewDone('You', yes)}
-        />
+        <TrailerReview user="You" token={token} ids={state.agreed} onDone={(yes) => handleReviewDone('You', yes)} />
+      ) : state.phase === 'reviewSwap' ? (
+        <div className="text-center py-20">
+          <p className="text-lg mb-2">✅ Your trailer review is complete.</p>
+          <p className="text-sm text-neutral-300 mb-4">Now hand the device to your partner so they can review the same shortlist.</p>
+          <button
+            onClick={() => setState({ ...state, currentUser: 'Partner', phase: 'review2' })}
+            className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            I'm the Partner → Start Trailer Review
+          </button>
+        </div>
       ) : state.phase === 'review2' ? (
-        <TrailerReview
-          user="Partner"
-          token={token}
-          ids={state.agreed}
-          onDone={(yes) => handleReviewDone('Partner', yes)}
-        />
+        <TrailerReview user="Partner" token={token} ids={state.agreed} onDone={(yes) => handleReviewDone('Partner', yes)} />
       ) : state.phase === 'final' ? (
-        <Results agreedIds={state.agreed} token={token} heading="Final agreed picks" />
+        <div>
+          <Results agreedIds={state.agreed} token={token} heading="Final agreed picks" />
+          <div className="mt-6 p-4 rounded-2xl border border-neutral-800 bg-neutral-900/50 text-center">
+            <p className="mb-3 text-sm text-neutral-300">You both liked all these! I’ll pick the winner for you</p>
+            <button
+              onClick={() => randomPick()}
+              disabled={!state.agreed.length}
+              className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Random pick
+            </button>
+          </div>
+        </div>
+      ) : state.phase === 'winner' ? (
+        <Winner id={winnerId!} token={token} onBack={() => setState({ ...state, phase: 'final' })} />
       ) : !currentMovie ? (
         <div className="text-center py-20 text-neutral-400">Click Build Deck to begin</div>
       ) : (
         <div className="text-center">
           <Card movie={currentMovie} genres={genres} />
           <div className="mt-6 flex justify-center gap-4">
-            <button onClick={() => act('pass')} className="w-28 h-12 rounded-2xl bg-neutral-800 hover:bg-neutral-700">
-              {Icon.X()} Pass
-            </button>
-            <button onClick={() => act('like')} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500">
-              {Icon.Heart()} Like
-            </button>
+            <button onClick={() => act('pass')} className="w-28 h-12 rounded-2xl bg-neutral-800 hover:bg-neutral-700">{Icon.X()} Pass</button>
+            <button onClick={() => act('like')} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500">{Icon.Heart()} Like</button>
           </div>
         </div>
       )}
@@ -213,7 +258,7 @@ export default function App() {
   );
 }
 
-function Card({ movie, genres }: { movie: any; genres: { id: number; name: string }[] }) {
+function Card({ movie, genres }: { movie: MovieLite; genres: { id: number; name: string }[] }) {
   return (
     <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto">
       {movie.poster && <img src={movie.poster} alt={movie.title} className="w-full rounded-lg mb-4" />}
@@ -242,7 +287,9 @@ function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: nu
           if (!res.ok) continue;
           const j = await res.json();
           out.push(j);
-        } catch {}
+        } catch {
+          // ignore single fetch errors
+        }
       }
       setItems(out);
     })();
@@ -257,8 +304,8 @@ function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: nu
       const res = await fetch(`https://api.themoviedb.org/3/movie/${id}/videos?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('No trailer');
       const data = await res.json();
-      const yt = data.results.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer');
-      if (yt) setTrailers({ ...trailers, [id]: yt.key });
+      const yt = data.results.find((v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'));
+      setTrailers({ ...trailers, [id]: yt ? yt.key : 'none' });
       setOpenTrailer(id);
     } catch {
       setTrailers({ ...trailers, [id]: 'none' });
@@ -279,6 +326,7 @@ function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: nu
           const youtubeUrl = trailerKey && trailerKey !== 'none'
             ? `https://www.youtube.com/watch?v=${trailerKey}`
             : `https://www.youtube.com/results?search_query=${encodeURIComponent((m.title || '') + ' trailer')}`;
+
           return (
             <li key={m.id} className="p-3 rounded-xl border border-neutral-800 bg-neutral-900/40">
               <div className="flex gap-3">
@@ -291,42 +339,12 @@ function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: nu
                     <a href={tmdbUrl} target="_blank" rel="noreferrer" className="text-xs underline text-blue-400 hover:text-blue-300">View on TMDB</a>
                   </div>
                   {openTrailer === m.id && (
-                    trailerKey && trailerKey !== 'none' ? (
-                      <div className="mt-2">
-                        <div className="aspect-video w-full overflow-hidden rounded-lg border border-neutral-800">
-                          <iframe
-                            src={`https://www.youtube.com/embed/${trailerKey}`}
-                            title={m.title}
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                            className="w-full h-full"
-                          />
-                        </div>
-                        {/* Always show a direct link in case iframes are blocked (e.g., StackBlitz sandbox) */}
-                        <div className="mt-2">
-                          <a
-                            href={youtubeUrl}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="text-xs underline text-blue-400 hover:text-blue-300"
-                          >
-                            Open trailer on YouTube
-                          </a>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-xs text-neutral-300">
-                        No trailer available via TMDB.{' '}
-                        <a
-                          href={youtubeUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="underline text-blue-400 hover:text-blue-300"
-                        >
-                          Try YouTube search
-                        </a>
-                      </div>
-                    )
+                    <div className="mt-2 text-xs text-neutral-300">
+                      {/* Embedded player temporarily disabled — show link(s) only */}
+                      <a href={youtubeUrl} target="_blank" rel="noreferrer noopener" className="underline text-blue-400 hover:text-blue-300">
+                        Open trailer on YouTube
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
@@ -338,7 +356,44 @@ function Results({ agreedIds, token, heading = 'Agreed Picks' }: { agreedIds: nu
   );
 }
 
-/** Trailer review phase (one user at a time, sequential) */
+/** Trailer review phase (one user at a time, sequential; links only) */
+function Winner({ id, token, onBack }: { id: number; token: string; onBack: () => void }) {
+  const [m, setM] = useState<any | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`https://api.themoviedb.org/3/movie/${id}?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } });
+        const j = await r.json();
+        if (alive) setM(j);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [id, token]);
+
+  if (!m) return <div className="text-center py-20 text-neutral-400">Choosing a winner…</div>;
+
+  const poster = m.poster_path ? TMDB_IMAGE_BASE + m.poster_path : null;
+  const tmdbUrl = `https://www.themoviedb.org/movie/${m.id}`;
+
+  return (
+    <div className="max-w-2xl mx-auto text-center">
+      <h2 className="text-xl font-semibold mb-2">Tonight’s pick</h2>
+      <div className="p-4 rounded-2xl border border-neutral-800 bg-neutral-900/40">
+        {poster && <img src={poster} alt={m.title} className="w-52 mx-auto rounded-lg mb-3 border border-neutral-800" />}
+        <div className="text-lg font-medium">{m.title} {m.release_date ? <span className="text-neutral-400">({String(m.release_date).slice(0,4)})</span> : null}</div>
+        <p className="text-sm text-neutral-300 mt-2">{m.tagline || m.overview}</p>
+        <div className="mt-3">
+          <a href={tmdbUrl} target="_blank" rel="noreferrer" className="text-xs underline text-blue-400 hover:text-blue-300">View on TMDB</a>
+        </div>
+      </div>
+      <div className="mt-4 flex justify-center">
+        <button onClick={onBack} className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700">Back to list</button>
+      </div>
+    </div>
+  );
+}
+
 function TrailerReview({ user, token, ids, onDone }: { user: User; token: string; ids: number[]; onDone: (yesIds: number[]) => void }) {
   const [i, setI] = useState(0);
   const [meta, setMeta] = useState<any | null>(null);
@@ -351,11 +406,13 @@ function TrailerReview({ user, token, ids, onDone }: { user: User; token: string
     setMeta(null);
     setTrailer(null);
     if (!id) return;
+
     (async () => {
       try {
         const m = await fetch(`https://api.themoviedb.org/3/movie/${id}?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
         if (!alive) return;
         setMeta(m);
+
         const vres = await fetch(`https://api.themoviedb.org/3/movie/${id}/videos?language=en-GB`, { headers: { Authorization: `Bearer ${token}` } });
         if (!vres.ok) throw new Error('no videos');
         const vv = await vres.json();
@@ -365,7 +422,10 @@ function TrailerReview({ user, token, ids, onDone }: { user: User; token: string
         if (alive) setTrailer('none');
       }
     })();
-    return () => { alive = false; };
+
+    return () => {
+      alive = false;
+    };
   }, [id, token]);
 
   const next = (approve: boolean) => {
@@ -398,26 +458,27 @@ function TrailerReview({ user, token, ids, onDone }: { user: User; token: string
           <div className="flex-1">
             <div className="text-base font-medium mb-1">{meta?.title} {meta?.release_date ? <span className="text-neutral-400">({String(meta.release_date).slice(0,4)})</span> : null}</div>
             <div className="text-xs text-neutral-400 mb-2">{meta?.tagline || meta?.overview}</div>
-            <div className="aspect-video w-full overflow-hidden rounded-lg border border-neutral-800 bg-black">
-              {trailer && trailer !== 'none' ? (
-                <iframe
-                  src={`https://www.youtube.com/embed/${trailer}`}
-                  title={meta?.title || 'Trailer'}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  className="w-full h-full"
-                />
-              ) : (
-                <div className="h-full grid place-items-center text-xs text-neutral-400 p-4 text-center">
-                  No embeddable trailer found.
-                  <div className="mt-2"><a href={youtubeUrl} target="_blank" rel="noreferrer noopener" className="underline text-blue-400 hover:text-blue-300">Open on YouTube</a></div>
-                </div>
-              )}
+            <div className="p-3 rounded-lg border border-neutral-800 bg-neutral-900">
+              {/* Embedded player temporarily disabled — show link(s) only */}
+              <a href={youtubeUrl} target="_blank" rel="noreferrer noopener" className="text-sm underline text-blue-400 hover:text-blue-300">
+                Open trailer on YouTube
+              </a>
             </div>
             <div className="mt-4 flex items-center justify-center gap-4">
               <button onClick={() => next(false)} className="w-28 h-12 rounded-2xl bg-neutral-800 hover:bg-neutral-700">{Icon.X()} No</button>
               <button onClick={() => next(true)} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500">{Icon.Heart()} Yes</button>
             </div>
+            {user === 'You' && (
+              <div className="mt-3 text-center">
+                <button
+                  onClick={() => onDone(yes)}
+                  className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                  title="Skip the remaining trailers and hand off to your partner now"
+                >
+                  ▶️ Hand to Partner now
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
