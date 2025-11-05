@@ -8,12 +8,7 @@ const Icon = {
   Film: () => '🎬',
 };
 
-type User = 'You' | 'Partner';https://chatgpt.com/c/690282b2-ca6c-8329-abf5-1e82bbeb7a89
-https://www.themoviedb.org/settings/api
-https://github.com/andrewbritton/coupleswipe/blob/main/src/App.tsx
-https://app.netlify.com/projects/coupleswipe/configuration/general#project-details
-https://coupleswipe.netlify.app/
-https://www.byteplus.com/en/topic/548856?title=chatgpt-keeps-crashing-chrome-how-to-fix-it-in-2025
+type User = 'You' | 'Partner';
 
 type MovieLite = {
   id: number;
@@ -176,7 +171,7 @@ export default function App() {
 
   const currentMovie = state.cohort[state.idx[state.currentUser]];
 
-  const randomPick = (force?: boolean) => {
+  const randomPick = () => {
     const pool = state.agreed;
     if (!pool.length) return;
     const id = pool[Math.floor(Math.random() * pool.length)];
