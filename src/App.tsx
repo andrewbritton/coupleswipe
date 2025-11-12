@@ -89,8 +89,9 @@ const TrailerReview=({user,token,ids:onIds,onDone}:{user:User;token:string;ids:n
   const ids=Array.isArray(onIds)?onIds:[];
   const [i,setI]=useState(0),[meta,setMeta]=useState<any|null>(null),[tr,setTr]=useState<string|'none'|null>(null),[yes,setYes]=useState<number[]>([]);
   const [dx,setDx]=useState(0); const [drag,setDrag]=useState(false); const [start,setStart]=useState<number|null>(null);
+  const [playing,setPlaying]=useState(false);
   const id=ids[i] as number|undefined;
-  useEffect(()=>{let live=true;setMeta(null);setTr(null);if(!id)return;(async()=>{
+  useEffect(()=>{let live=true;setMeta(null);setTr(null);setPlaying(false);if(!id)return;(async()=>{
     try{
       const m=await fetch(`https://api.themoviedb.org/3/movie/${id}?language=en-GB`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
       if(!live)return;setMeta(m||null);
@@ -102,30 +103,43 @@ const TrailerReview=({user,token,ids:onIds,onDone}:{user:User;token:string;ids:n
   if(!ids.length) return <div className="text-center py-20 text-neutral-400">No titles to review.</div>;
   const poster=meta?.poster_path?IMG+meta.poster_path:null, title=(meta?.title||'').trim(), rel=meta?.release_date?`(${String(meta.release_date).slice(0,4)})`:'';
   const desc=(meta?.tagline||meta?.overview||'').trim();
-  const yt=tr&&tr!=='none'?`https://www.youtube.com/watch?v=${tr}`:`https://www.youtube.com/results?search_query=${encodeURIComponent(title+' trailer')}`;
+  const ytWatch=tr&&tr!=='none'?`https://www.youtube.com/watch?v=${tr}`:`https://www.youtube.com/results?search_query=${encodeURIComponent(title+' trailer')}`;
+  const ytEmbed=tr&&tr!=='none'?`https://www.youtube.com/embed/${tr}?autoplay=1&rel=0`:'about:blank';
   const next=(ok:boolean)=>{const picks=ok&&id?[...yes,id]:yes; if(i+1>=ids.length) onDone(picks); else {setYes(picks); setI(i+1);} };
-  const end=()=>{ const d=swipeDir(dx,64); if(d){ next(d==='right'); } setDx(0); setDrag(false); setStart(null); };
-  const move=(x:number)=>{ if(start==null) return; setDx(x-start); };
+  const end=()=>{ if(playing) return; const d=swipeDir(dx,64); if(d){ next(d==='right'); } setDx(0); setDrag(false); setStart(null); };
+  const move=(x:number)=>{ if(playing||start==null) return; setDx(x-start); };
   return(
     <div className="max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-3 text-center">{user}: Trailer review {i+1} / {ids.length}</h2>
       <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] flex flex-col overflow-hidden select-none"
-           onTouchStart={(e)=>{setStart(e.touches[0].clientX); setDrag(true);}}
+           onTouchStart={(e)=>{ if(playing) return; setStart(e.touches[0].clientX); setDrag(true);}}
            onTouchMove={(e)=>move(e.touches[0].clientX)}
            onTouchEnd={end}
-           onMouseDown={(e)=>{if(e.button!==0)return; setStart(e.clientX); setDrag(true);}}
+           onMouseDown={(e)=>{if(playing||e.button!==0)return; setStart(e.clientX); setDrag(true);}}
            onMouseMove={(e)=>{if(start!=null) move(e.clientX);}}
            onMouseUp={end}
-           style={{transform:`translateX(${dx}px) rotate(${dx/20}deg)`,transition:drag?'none':'transform 200ms'}}>
+           style={{transform:`translateX(${dx}px) rotate(${dx/20}deg)`,transition:drag&&!playing?'none':'transform 200ms'}}>
         <div className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50 relative">
           {poster? <img src={poster} alt={title||'Poster'} className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-neutral-300 text-sm"><I.M/> No poster available</div>}
+          {/* play button (opens inline if we have a YouTube key) */}
           <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-0"><div className="h-28 w-28 rounded-full bg-white/20 animate-ping"/></div>
-          <a href={yt} target="_blank" rel="noopener noreferrer" aria-label="Play trailer on YouTube" className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"><span className="text-5xl leading-none"><I.P/></span></a>
-          <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 border border-white/30 text-white text-xs">Play trailer (opens YouTube)</div>
+          {tr&&tr!=='none'? (
+            <button onClick={()=>setPlaying(true)} aria-label="Play trailer inline" className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"><span className="text-5xl leading-none"><I.P/></span></button>
+          ) : (
+            <a href={ytWatch} target="_blank" rel="noopener noreferrer" aria-label="Search trailer on YouTube" className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"><span className="text-5xl leading-none"><I.P/></span></a>
+          )}
+          <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 border border-white/30 text-white text-xs">Play trailer</div>
           <div className="pointer-events-none absolute inset-0 flex items-start justify-between p-3">
             <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx<-32?'bg-red-600/80':'bg-transparent'}`}>← No</div>
             <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx>32?'bg-green-600/80':'bg-transparent'}`}>Yes →</div>
           </div>
+          {/* inline YT player overlay */}
+          {playing&&tr&&tr!=='none' && (
+            <div className="absolute inset-0 z-20 bg-black/90">
+              <button aria-label="Close trailer" onClick={()=>setPlaying(false)} className="absolute top-2 right-2 z-30 px-3 py-1 rounded-lg bg-neutral-900/80 border border-neutral-700 text-sm"><I.X/> Close</button>
+              <iframe className="absolute inset-0 w-full h-full" src={ytEmbed} title={title||'Trailer'} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
+            </div>
+          )}
         </div>
         <div className="flex-1 min-h-0 flex flex-col text-center">
           <h3 className="text-base font-medium mb-1">{title||'Untitled'} {rel&&<span className="text-neutral-400">{rel}</span>}</h3>
