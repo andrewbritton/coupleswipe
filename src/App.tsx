@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 // tiny unicode icon set
 const I={H:()=> <span aria-hidden>{'\u2665'}</span>, X:()=> <span aria-hidden>{'\u00D7'}</span>, R:()=> <span aria-hidden>{'\u21BB'}</span>, F:()=> <span aria-hidden>{'\u25A0'}</span>, M:()=> <span aria-hidden>{'\u25A6'}</span>, P:()=> <span aria-hidden>{'\u25B6'}</span>};
 
+type User = 'You' | 'Partner';
+
 const IMG='https://image.tmdb.org/t/p/w780';
-const okUrl=(u?:string|null)=>/^https?:/i.test(u?.trim?.()||'');
+const okUrl=(u?:string|null)=>/^https?:\/\//i.test(u?.trim?.()||'');
 
 // swipe helper
 const swipeDir=(dx:number, th=64)=> Math.abs(dx)>th ? (dx>0?'right':'left') : null;
@@ -66,8 +68,8 @@ const Card=({movie,genres,onSwipe}:{movie?:any;genres?:{id:number;name:string}[]
           <div className="w-full h-full grid place-items-center text-neutral-300 text-sm"><I.M/> No poster available</div>}
         {/* subtle swipe hint badges */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-between px-3">
-          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx<-TH/2?'bg-red-600/80':'bg-transparent'}`}>No</div>
-          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx>TH/2?'bg-green-600/80':'bg-transparent'}`}>Like</div>
+          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx<-TH/2?'bg-red-600/80':'bg-transparent'}`}>← No</div>
+          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx>TH/2?'bg-green-600/80':'bg-transparent'}`}>Yes →</div>
         </div>
       </div>
       <div className="flex-1 min-h-0 flex flex-col">
@@ -83,8 +85,7 @@ const Card=({movie,genres,onSwipe}:{movie?:any;genres?:{id:number;name:string}[]
   );
 };
 
-// --- trailer review ---
-const TrailerReview=({user,token,ids:onIds,onDone}:{user:'You'|'Partner';token:string;ids:number[]|undefined;onDone:(ids:number[])=>void;})=>{
+const TrailerReview=({user,token,ids:onIds,onDone}:{user:User;token:string;ids:number[]|undefined;onDone:(ids:number[])=>void;})=>{
   const ids=Array.isArray(onIds)?onIds:[];
   const [i,setI]=useState(0),[meta,setMeta]=useState<any|null>(null),[tr,setTr]=useState<string|'none'|null>(null),[yes,setYes]=useState<number[]>([]);
   const [dx,setDx]=useState(0); const [drag,setDrag]=useState(false); const [start,setStart]=useState<number|null>(null);
@@ -122,8 +123,8 @@ const TrailerReview=({user,token,ids:onIds,onDone}:{user:'You'|'Partner';token:s
           <a href={yt} target="_blank" rel="noopener noreferrer" aria-label="Play trailer on YouTube" className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"><span className="text-5xl leading-none"><I.P/></span></a>
           <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 border border-white/30 text-white text-xs">Play trailer (opens YouTube)</div>
           <div className="pointer-events-none absolute inset-0 flex items-start justify-between p-3">
-            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx<-32?'bg-red-600/80':'bg-transparent'}`}>No</div>
-            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx>32?'bg-green-600/80':'bg-transparent'}`}>Yes</div>
+            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx<-32?'bg-red-600/80':'bg-transparent'}`}>← No</div>
+            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx>32?'bg-green-600/80':'bg-transparent'}`}>Yes →</div>
           </div>
         </div>
         <div className="flex-1 min-h-0 flex flex-col text-center">
@@ -139,7 +140,6 @@ const TrailerReview=({user,token,ids:onIds,onDone}:{user:'You'|'Partner';token:s
   );
 };
 
-// --- results ---
 const Results=({agreedIds,token,heading='Agreed Picks'}:{agreedIds:number[];token:string;heading?:string;})=>{
   const [items,setItems]=useState<any[]>([]),[trailers,setT]=useState<Record<number,string>>({}),[open,setOpen]=useState<number|null>(null);
   useEffect(()=>{(async()=>{
@@ -173,7 +173,6 @@ const Results=({agreedIds,token,heading='Agreed Picks'}:{agreedIds:number[];toke
   );
 };
 
-// --- winner ---
 const Winner=({id,token,onBack,onRestart}:{id:number;token:string;onBack:()=>void;onRestart:()=>void;})=>{
   const [m,setM]=useState<any|null>(null);
   useEffect(()=>{let live=true;(async()=>{try{const r=await fetch(`https://api.themoviedb.org/3/movie/${id}?language=en-GB`,{headers:{Authorization:`Bearer ${token}`}}); const j=await r.json(); live&&setM(j);}catch{}})();return()=>{live=false}},[id,token]);
@@ -190,14 +189,13 @@ const Winner=({id,token,onBack,onRestart}:{id:number;token:string;onBack:()=>voi
   );
 };
 
-// --- app ---
 export default function App(){
   const prefs={region:'GB',monetization:'flatrate',providerIds:{netflix:8,prime:9},minVoteCount:50,language:'en-GB',sortBy:'popularity.desc',targetCount:10} as const;
   const [token,setToken]=useState(()=> (import.meta as any)?.env?.VITE_TMDB_TOKEN || localStorage.getItem('tmdb_v4_token') || ''),
         [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[deck,setDeck]=useState<number>(prefs.targetCount),
         [ban,setBan]=useState<Set<number>>(new Set()),[genres,setGenres]=useState<{id:number;name:string}[]>([]),
-        [names,setNames]=useState<Record<'You'|'Partner',string>>(()=>{try{const r=localStorage.getItem('cs_names'); if(r) return JSON.parse(r);}catch{} return {You:'',Partner:''};}),
-        [s,setS]=useState({user:'You' as 'You'|'Partner',phase:'welcome' as any,cohort:[] as any[],idx:{You:0,Partner:0},likes:{You:new Set<number>(),Partner:new Set<number>()},passes:{You:new Set<number>(),Partner:new Set<number>()},agreed:[] as number[]}),
+        [names,setNames]=useState<Record<User,string>>(()=>{try{const r=localStorage.getItem('cs_names'); if(r) return JSON.parse(r);}catch{} return {You:'',Partner:''};}),
+        [s,setS]=useState({user:'You' as User,phase:'welcome' as any,cohort:[] as any[],idx:{You:0,Partner:0},likes:{You:new Set<number>(),Partner:new Set<number>()},passes:{You:new Set<number>(),Partner:new Set<number>()},agreed:[] as number[]}),
         [reviewYes,setReviewYes]=useState<{You:Set<number>;Partner:Set<number>}>({You:new Set(),Partner:new Set()}),
         [win,setWin]=useState<number|null>(null);
 
@@ -218,14 +216,14 @@ export default function App(){
 
   function act(kind:'like'|'pass'){
     const cur=s.cohort[s.idx[s.user]]; if(!cur) return; const u=s.user; const likes=new Set(s.likes[u]), passes=new Set(s.passes[u]); (kind==='like'?likes:passes).add(cur.id);
-    let phase=s.phase, agreed=[...s.agreed]; let reviewStarter:null|'You'|'Partner'=null; const nextIdx=s.idx[u]+1;
+    let phase=s.phase, agreed=[...s.agreed]; let reviewStarter:null|User=null; const nextIdx=s.idx[u]+1;
     if(s.phase==='round2'&&kind==='like'){ const other=u==='You'?'Partner':'You'; if(s.likes[other].has(cur.id)&&!agreed.includes(cur.id)) agreed.push(cur.id); }
     if(nextIdx>=s.cohort.length){ if(s.phase==='round1') phase='swap'; else if(s.phase==='round2'){ if(agreed.length){ reviewStarter=Math.random()<0.5?'You':'Partner'; phase='reviewIntro'; } else { const idsThis=s.cohort.map(m=>m.id); const bothNo=idsThis.filter(id=>!s.likes.You.has(id)&&!s.likes.Partner.has(id)); if(bothNo.length) setBan(p=>new Set([...p,...bothNo])); const nx=Math.min(deck+10,200); setNotice(`No agreed picks this round. We'll add ${nx-deck} more ( ${deck} → ${nx} ) and deal again.`); setS(v=>({...v,likes:{...v.likes,[u]:likes},passes:{...v.passes,[u]:passes},idx:{...v.idx,[u]:nextIdx},phase:'noAgreed',agreed})); return; } } }
     setS(v=>({...v,user:reviewStarter??v.user,likes:{...v.likes,[u]:likes},passes:{...v.passes,[u]:passes},idx:{...v.idx,[u]:nextIdx},phase,agreed}));
   }
 
   const swap=()=>setS(v=>{const n=v.user==='You'?'Partner':'You'; return {...v,user:n,phase:'round2',idx:{...v.idx,[n]:0}}});
-  const reviewDone=(u:'You'|'Partner',ids:number[])=>{ const next=new Set(reviewYes[u]); ids.forEach(id=>next.add(id)); const upd={...reviewYes,[u]:next}; setReviewYes(upd); if(s.phase==='review1'){ setS(v=>({...v,phase:'reviewSwap'})); return;} const finals=s.agreed.filter(id=>upd.You.has(id)&&upd.Partner.has(id)); setS(v=>({...v,phase:finals.length?'final':'startOver',agreed:finals})); };
+  const reviewDone=(u:User,ids:number[])=>{ const next=new Set(reviewYes[u]); ids.forEach(id=>next.add(id)); const upd={...reviewYes,[u]:next}; setReviewYes(upd); if(s.phase==='review1'){ setS(v=>({...v,phase:'reviewSwap'})); return;} const finals=s.agreed.filter(id=>upd.You.has(id)&&upd.Partner.has(id)); setS(v=>({...v,phase:finals.length?'final':'startOver',agreed:finals})); };
 
   const cur=s.cohort[s.idx[s.user]];
   const pick=()=>{ if(!s.agreed.length) return; const id=s.agreed[Math.floor(Math.random()*s.agreed.length)]; setWin(id); setS(v=>({...v,phase:'winner'})); };
@@ -268,10 +266,11 @@ export default function App(){
             </div>
           </div>
         ) : s.phase==='preDeal'? (
-          <div className="max-w-xl mx-auto text.center py-10">
+          <div className="max-w-xl mx-auto text-center py-10">
             <h2 className="text-xl font-semibold mb-3">{(s.user==='You'?names.You:names.Partner)||'Someone'} has been randomly chosen to pick first</h2>
-            <p className="text-sm text-neutral-300 mb-6">When they have made their choices, the other person can make theirs!</p>
-            <button onClick={()=>buildDeck(deck)} className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white">Start picking</button>
+            <p className="text-sm text-neutral-300">When they have made their choices, the other person can make theirs!</p>
+            <p className="text-sm text-neutral-300 mt-3">On the next screen: <strong>swipe right</strong> for <span className="text-green-400 inline-flex items-center gap-1">Yes <I.H/></span>, <strong>swipe left</strong> for <span className="text-red-400 inline-flex items-center gap-1">No <I.X/></span>. You can also use the buttons.</p>
+            <button onClick={()=>buildDeck(deck)} className="mt-6 px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white">Start picking</button>
           </div>
         ) : s.phase==='swap'? (
           <div className="text-center py-20">
