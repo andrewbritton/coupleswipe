@@ -34,17 +34,32 @@ const WinnerCard=({movie,tmdbUrl}:{movie:any;tmdbUrl:string})=>{
 
 const safeMovie=(m:any)=>({id:m?.id??-1,title:m?.title??'Unknown title',overview:m?.overview??'',year:m?.year??'',poster:m?.poster??null,genre_ids:Array.isArray(m?.genre_ids)?m.genre_ids:[]});
 
-const Card=({movie,genres}:{movie?:any;genres?:{id:number;name:string}[]})=>{
+const Card=({movie,genres,onSwipe}:{movie?:any;genres?:{id:number;name:string}[];onSwipe?:(dir:'left'|'right')=>void;})=>{
   const [imgOk,setImgOk]=useState(true);
+  const [dx,setDx]=useState(0); const [drag,setDrag]=useState(false); const [start,setStart]=useState<number|null>(null);
   const m=useMemo(()=>safeMovie(movie),[movie]);
   const g=Array.isArray(genres)?genres:[];
-  const poster=okUrl(m.poster)?m.poster:null;
-  const s=(m.overview||'').trim();
+  const poster=okUrl(m.poster)?m.poster:null; const s=(m.overview||'').trim();
+  const TH=64; // swipe threshold px
+  const end=()=>{ if(Math.abs(dx)>TH){ onSwipe?.(dx>0?'right':'left'); } setDx(0); setDrag(false); setStart(null); };
+  const move=(x:number)=>{ if(start==null) return; setDx(x-start); };
   return(
-    <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] min-h-0 overflow-hidden flex flex-col">
-      <div className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50">
+    <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] min-h-0 overflow-hidden flex flex-col select-none"
+      onTouchStart={(e)=>{setStart(e.touches[0].clientX); setDrag(true);}}
+      onTouchMove={(e)=>move(e.touches[0].clientX)}
+      onTouchEnd={end}
+      onMouseDown={(e)=>{if(e.button!==0)return; setStart(e.clientX); setDrag(true);}}
+      onMouseMove={(e)=>{if(start!=null) move(e.clientX);}}
+      onMouseUp={end}
+      style={{transform:`translateX(${dx}px) rotate(${dx/20}deg)`,transition:drag?'none':'transform 200ms'}}>
+      <div className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50 relative">
         {poster&&imgOk? <img src={poster} alt={m.title} className="w-full h-full object-cover" onError={()=>setImgOk(false)}/> :
           <div className="w-full h-full grid place-items-center text-neutral-300 text-sm"><I.M/> No poster available</div>}
+        {/* subtle swipe hint badges */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-between px-3">
+          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx<-TH/2?'bg-red-600/80':'bg-transparent'}`}>No</div>
+          <div className={`px-2 py-1 rounded-lg text-xs font-medium ${dx>TH/2?'bg-green-600/80':'bg-transparent'}`}>Like</div>
+        </div>
       </div>
       <div className="flex-1 min-h-0 flex flex-col">
         <h2 className="text-lg font-semibold mb-1">{m.title} {m.year&&<span className="text-neutral-400">({m.year})</span>}</h2>
@@ -286,7 +301,7 @@ export default function App(){
           <div className="text-center py-20 text-neutral-400">Click Build Deck to begin</div>
         ) : (
           <div className="text-center">
-            <Card movie={cur} genres={genres}/>
+            <Card movie={cur} genres={genres} onSwipe={(d)=>act(d==='right'?'like':'pass')}/>
             <div className="mt-6 flex justify-center gap-4">
               <button onClick={()=>act('pass')} className="w-28 h-12 rounded-2xl bg-neutral-800 hover:bg-neutral-700"><I.X/> Pass</button>
               <button onClick={()=>act('like')} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500"><I.H/> Like</button>
