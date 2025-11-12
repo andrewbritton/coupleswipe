@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 // tiny unicode icon set
 const I={H:()=> <span aria-hidden>{'\u2665'}</span>, X:()=> <span aria-hidden>{'\u00D7'}</span>, R:()=> <span aria-hidden>{'\u21BB'}</span>, F:()=> <span aria-hidden>{'\u25A0'}</span>, M:()=> <span aria-hidden>{'\u25A6'}</span>, P:()=> <span aria-hidden>{'\u25B6'}</span>};
@@ -347,4 +347,4 @@ export default function App(){
     </div>
   );
 }
-// sanity check 1
+// sanity check 2
