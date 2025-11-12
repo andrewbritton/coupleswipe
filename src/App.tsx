@@ -316,8 +316,8 @@ const TrailerReview = ({ user, token, ids: onIds, onDone }: { user: User; token:
               >
                 <I.X /> Close
               </button>
-              {/* full-viewport responsive 16:9 player */}
-              <div className="absolute inset-0 flex items-center justify-center">
+              {/* full-viewport responsive 16:9 player pinned near top for immediate visibility on mobile */}
+              <div className="absolute inset-x-0 top-0 flex justify-center" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
                 <div className="w-screen">
                   <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
                     <iframe
@@ -820,7 +820,7 @@ export default function App() {
               <I.X /> Pass
             </button>
             <button onClick={() => act('like')} className="w-28 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500">
-              <I.H /> Like
+              <I.H /> Yes
             </button>
           </div>
         </div>
@@ -828,4 +828,3 @@ export default function App() {
     </div>
   );
 }
-// sanity check 3
