@@ -6,15 +6,24 @@ const I={H:()=> <span aria-hidden>{'\u2665'}</span>, X:()=> <span aria-hidden>{'
 const IMG='https://image.tmdb.org/t/p/w780';
 const okUrl=(u?:string|null)=>/^https?:/i.test(u?.trim?.()||'');
 
+// swipe helper
+const swipeDir=(dx:number, th=64)=> Math.abs(dx)>th ? (dx>0?'right':'left') : null;
+
 // --- quick runtime tests (console only) ---
 function runTests(){
-  const t=(name:string,fn:()=>any)=>{try{const r=fn();console.log('TEST ✓',name,r);}catch(e){console.error('TEST ✗',name,e);}};
+  const t=(name:string,fn:()=>any)=>{try{const r=fn();console.log('TEST ✓',name,r);}catch(e){console.error('TEST ✗',name,e)}};
+  // existing tests (unchanged)
   t('okUrl true',()=>okUrl('http://a.b'));
   t('okUrl false empty',()=>!okUrl(''));
   t('safeMovie defaults',()=>{const m=safeMovie(null as any); if(m.id!==-1||m.title!=='Unknown title') throw new Error('defaults'); return m;});
+  t('swipeDir none',()=>swipeDir(10,64)===null);
+  t('swipeDir right',()=>swipeDir(80,64)==='right');
+  t('swipeDir left',()=>swipeDir(-99,64)==='left');
+  // extra tests
+  t('swipeDir boundary equal threshold',()=>swipeDir(64,64)===null && swipeDir(-64,64)===null);
+  t('swipeDir large values',()=>swipeDir(500,64)==='right' && swipeDir(-500,64)==='left');
 }
 
-// --- cards ---
 const WinnerCard=({movie,tmdbUrl}:{movie:any;tmdbUrl:string})=>{
   const poster=movie?.poster_path?IMG+movie.poster_path:null;
   return(
@@ -41,7 +50,7 @@ const Card=({movie,genres,onSwipe}:{movie?:any;genres?:{id:number;name:string}[]
   const g=Array.isArray(genres)?genres:[];
   const poster=okUrl(m.poster)?m.poster:null; const s=(m.overview||'').trim();
   const TH=64; // swipe threshold px
-  const end=()=>{ if(Math.abs(dx)>TH){ onSwipe?.(dx>0?'right':'left'); } setDx(0); setDrag(false); setStart(null); };
+  const end=()=>{ const d=swipeDir(dx,TH); if(d){ onSwipe?.(d); } setDx(0); setDrag(false); setStart(null); };
   const move=(x:number)=>{ if(start==null) return; setDx(x-start); };
   return(
     <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] min-h-0 overflow-hidden flex flex-col select-none"
@@ -78,6 +87,7 @@ const Card=({movie,genres,onSwipe}:{movie?:any;genres?:{id:number;name:string}[]
 const TrailerReview=({user,token,ids:onIds,onDone}:{user:'You'|'Partner';token:string;ids:number[]|undefined;onDone:(ids:number[])=>void;})=>{
   const ids=Array.isArray(onIds)?onIds:[];
   const [i,setI]=useState(0),[meta,setMeta]=useState<any|null>(null),[tr,setTr]=useState<string|'none'|null>(null),[yes,setYes]=useState<number[]>([]);
+  const [dx,setDx]=useState(0); const [drag,setDrag]=useState(false); const [start,setStart]=useState<number|null>(null);
   const id=ids[i] as number|undefined;
   useEffect(()=>{let live=true;setMeta(null);setTr(null);if(!id)return;(async()=>{
     try{
@@ -93,15 +103,28 @@ const TrailerReview=({user,token,ids:onIds,onDone}:{user:'You'|'Partner';token:s
   const desc=(meta?.tagline||meta?.overview||'').trim();
   const yt=tr&&tr!=='none'?`https://www.youtube.com/watch?v=${tr}`:`https://www.youtube.com/results?search_query=${encodeURIComponent(title+' trailer')}`;
   const next=(ok:boolean)=>{const picks=ok&&id?[...yes,id]:yes; if(i+1>=ids.length) onDone(picks); else {setYes(picks); setI(i+1);} };
+  const end=()=>{ const d=swipeDir(dx,64); if(d){ next(d==='right'); } setDx(0); setDrag(false); setStart(null); };
+  const move=(x:number)=>{ if(start==null) return; setDx(x-start); };
   return(
     <div className="max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-3 text-center">{user}: Trailer review {i+1} / {ids.length}</h2>
-      <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] flex flex-col overflow-hidden">
+      <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] flex flex-col overflow-hidden select-none"
+           onTouchStart={(e)=>{setStart(e.touches[0].clientX); setDrag(true);}}
+           onTouchMove={(e)=>move(e.touches[0].clientX)}
+           onTouchEnd={end}
+           onMouseDown={(e)=>{if(e.button!==0)return; setStart(e.clientX); setDrag(true);}}
+           onMouseMove={(e)=>{if(start!=null) move(e.clientX);}}
+           onMouseUp={end}
+           style={{transform:`translateX(${dx}px) rotate(${dx/20}deg)`,transition:drag?'none':'transform 200ms'}}>
         <div className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50 relative">
           {poster? <img src={poster} alt={title||'Poster'} className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-neutral-300 text-sm"><I.M/> No poster available</div>}
           <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-0"><div className="h-28 w-28 rounded-full bg-white/20 animate-ping"/></div>
           <a href={yt} target="_blank" rel="noopener noreferrer" aria-label="Play trailer on YouTube" className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"><span className="text-5xl leading-none"><I.P/></span></a>
           <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 border border-white/30 text-white text-xs">Play trailer (opens YouTube)</div>
+          <div className="pointer-events-none absolute inset-0 flex items-start justify-between p-3">
+            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx<-32?'bg-red-600/80':'bg-transparent'}`}>No</div>
+            <div className={`px-2 py-1 rounded-lg text-xs font-medium self-start ${dx>32?'bg-green-600/80':'bg-transparent'}`}>Yes</div>
+          </div>
         </div>
         <div className="flex-1 min-h-0 flex flex-col text-center">
           <h3 className="text-base font-medium mb-1">{title||'Untitled'} {rel&&<span className="text-neutral-400">{rel}</span>}</h3>
@@ -245,7 +268,7 @@ export default function App(){
             </div>
           </div>
         ) : s.phase==='preDeal'? (
-          <div className="max-w-xl mx-auto text-center py-10">
+          <div className="max-w-xl mx-auto text.center py-10">
             <h2 className="text-xl font-semibold mb-3">{(s.user==='You'?names.You:names.Partner)||'Someone'} has been randomly chosen to pick first</h2>
             <p className="text-sm text-neutral-300 mb-6">When they have made their choices, the other person can make theirs!</p>
             <button onClick={()=>buildDeck(deck)} className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white">Start picking</button>
