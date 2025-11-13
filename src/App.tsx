@@ -516,7 +516,6 @@ const TrailerReview = ({
                         title={title || 'Trailer'}
                         allow="autoplay; encrypted-media; picture-in-picture"
                         allowFullScreen
-                        playsInline
                         onError={() =>
                           setEmbedError(
                             "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
