@@ -283,16 +283,22 @@ const TrailerReview = ({
   const [dx, setDx] = useState(0);
   const [drag, setDrag] = useState(false);
   const [start, setStart] = useState<number | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [embedError, setEmbedError] = useState<string | null>(null);
+
+  // NEW: play mode state
+  // 'closed' = no overlay
+  // 'choice' = ask "how do you want to watch?"
+  // 'embed'  = show iframe + fallback
+  const [mode, setMode] = useState<'closed' | 'choice' | 'embed'>('closed');
+
   const id = ids[i] as number | undefined;
 
   useEffect(() => {
     let live = true;
     setMeta(null);
     setTr(null);
-    setPlaying(false);
     setEmbedError(null);
+    setMode('closed');
     if (!id) return;
     (async () => {
       try {
@@ -353,6 +359,11 @@ const TrailerReview = ({
     setDx(x - start);
   };
 
+  const closeOverlay = () => {
+    setMode('closed');
+    setEmbedError(null);
+  };
+
   return (
     <div className="max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-3 text-center">
@@ -377,7 +388,7 @@ const TrailerReview = ({
         onMouseUp={end}
         style={{
           transform: `translateX(${dx}px) rotate(${dx / 20}deg)`,
-          transition: drag && !playing ? 'none' : 'transform 200ms',
+          transition: drag ? 'none' : 'transform 200ms',
         }}
       >
         <div className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50 relative">
@@ -388,17 +399,18 @@ const TrailerReview = ({
               <I.M /> No poster available
             </div>
           )}
-          {/* play button (opens inline if we have a YouTube key) */}
+          {/* pulsating play halo */}
           <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-0">
             <div className="h-28 w-28 rounded-full bg-white/20 animate-ping" />
           </div>
+          {/* BIG PLAY button: opens "choice" overlay */}
           {tr && tr !== 'none' ? (
             <button
               onClick={() => {
                 setEmbedError(null);
-                setPlaying(true);
+                setMode('choice');
               }}
-              aria-label="Play trailer inline"
+              aria-label="Play trailer"
               className="absolute z-10 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center h-24 w-24 rounded-full bg-black/60 border border-white/60 ring-8 ring-white/20 shadow-2xl hover:bg-black/70 focus:outline-none"
             >
               <span className="text-5xl leading-none">
@@ -438,20 +450,18 @@ const TrailerReview = ({
             </div>
           </div>
 
-          {/* inline YT player overlay (full screen) */}
-          {playing && tr && tr !== 'none' && (
+          {/* FULLSCREEN OVERLAY: choice screen or iframe screen */}
+          {mode !== 'closed' && tr && tr !== 'none' && (
             <div className="fixed inset-0 z-50 bg-black/90">
               <button
                 aria-label="Close trailer"
-                onClick={() => {
-                  setPlaying(false);
-                  setEmbedError(null);
-                }}
+                onClick={closeOverlay}
                 className="absolute top-3 right-3 z-[70] px-3 py-1.5 rounded-lg bg-neutral-900/80 border border-neutral-700 text-sm"
               >
                 <I.X /> Close
               </button>
-              {/* swipe capture rails (allow swipe while video plays) */}
+
+              {/* swipe capture rails (allow swipe while overlay up) */}
               <div
                 className="absolute inset-y-0 left-0 w-[22%] z-[70] cursor-ew-resize"
                 onTouchStart={(e) => {
@@ -488,57 +498,92 @@ const TrailerReview = ({
                 }}
                 onMouseUp={end}
               />
-              {/* full-viewport responsive 16:9 player pinned near top for mobile */}
+
               <div
                 className="absolute inset-x-0 top-0 flex justify-center"
                 style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
               >
-                <div className="w-screen">
-                  {embedError ? (
-                    // Explicit error case (desktop / browsers that fire onError)
-                    <div className="px-4 py-6 text-center">
-                      <p className="text-sm text-neutral-100 mb-3">
-                        {embedError ||
-                          "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled)."}
+                <div className="w-screen px-4">
+                  {mode === 'choice' ? (
+                    // STEP 1: ask how to watch
+                    <div className="max-w-md mx-auto text-center py-6">
+                      <h3 className="text-base font-semibold mb-3">
+                        How do you want to watch this trailer?
+                      </h3>
+                      <p className="text-xs text-neutral-200 mb-4">
+                        Some trailers can&apos;t be played inside the app (for example,
+                        age-restricted or embedding disabled). You can try playing it
+                        here first, or jump straight to YouTube.
                       </p>
-                      <a
-                        href={ytWatch}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
-                      >
-                        Watch on YouTube
-                      </a>
+                      <div className="flex flex-col gap-3">
+                        <button
+                          onClick={() => {
+                            setEmbedError(null);
+                            setMode('embed');
+                          }}
+                          className="w-full px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
+                        >
+                          Play here in the app
+                        </button>
+                        <button
+                          onClick={() => {
+                            window.open(ytWatch, '_blank', 'noopener,noreferrer');
+                            closeOverlay();
+                          }}
+                          className="w-full px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm font-medium"
+                        >
+                          Open in YouTube
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    // Normal case: show iframe *and* always show a YouTube fallback below
+                    // STEP 2: iframe + fallback
                     <div className="flex flex-col items-center">
-                      <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
-                        <iframe
-                          className="absolute inset-0 w-full h-full z-[60]"
-                          src={ytEmbed}
-                          title={title || 'Trailer'}
-                          allow="autoplay; encrypted-media; picture-in-picture"
-                          allowFullScreen
-                          onError={() =>
-                            setEmbedError(
-                              "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="mt-3 px-4 text-center text-xs text-neutral-100">
-                        If the trailer doesn&apos;t play properly on your device (especially
-                        on mobile), tap below to watch it directly on YouTube.
-                      </div>
-                      <a
-                        href={ytWatch}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2 inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
-                      >
-                        Watch on YouTube
-                      </a>
+                      {embedError ? (
+                        <div className="max-w-md mx-auto text-center py-6">
+                          <p className="text-sm text-neutral-100 mb-3">
+                            {embedError ||
+                              "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled)."}
+                          </p>
+                          <a
+                            href={ytWatch}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
+                          >
+                            Watch on YouTube
+                          </a>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="relative w-full max-w-xl" style={{ paddingTop: '56.25%' }}>
+                            <iframe
+                              className="absolute inset-0 w-full h-full z-[60]"
+                              src={ytEmbed}
+                              title={title || 'Trailer'}
+                              allow="autoplay; encrypted-media; picture-in-picture"
+                              allowFullScreen
+                              onError={() =>
+                                setEmbedError(
+                                  "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="mt-3 text-center text-xs text-neutral-100 max-w-md">
+                            If the trailer doesn&apos;t play properly, tap below to open it
+                            directly on YouTube.
+                          </div>
+                          <a
+                            href={ytWatch}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
+                          >
+                            Watch on YouTube
+                          </a>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -546,6 +591,8 @@ const TrailerReview = ({
             </div>
           )}
         </div>
+
+        {/* Bottom section: description + Yes/No */}
         <div className="flex-1 min-h-0 flex flex-col text-center">
           <h3 className="text-base font-medium mb-1">
             {title || 'Untitled'}{' '}
