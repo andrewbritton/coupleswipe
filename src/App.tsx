@@ -26,7 +26,9 @@ const okUrl = (u?: string | null) => /^https?:\/\//i.test(u?.trim?.() || '');
 const swipeDir = (dx: number, th = 64) =>
   Math.abs(dx) > th ? (dx > 0 ? 'right' : 'left') : null;
 const ytEmbedUrl = (key?: string | null) =>
-  key ? `https://www.youtube.com/embed/${key}?autoplay=1&rel=0` : 'about:blank';
+  key
+    ? `https://www.youtube.com/embed/${key}?autoplay=1&rel=0&playsinline=1`
+    : 'about:blank';
 
 // Prefer embeddable/official-looking trailers from TMDB videos list
 function chooseBestYT(vs: any[]): string | null {
@@ -514,6 +516,7 @@ const TrailerReview = ({
                         title={title || 'Trailer'}
                         allow="autoplay; encrypted-media; picture-in-picture"
                         allowFullScreen
+                        playsInline
                         onError={() =>
                           setEmbedError(
                             "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
