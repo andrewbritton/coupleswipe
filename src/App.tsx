@@ -11,6 +11,8 @@ const I = {
 };
 
 type User = 'You' | 'Partner';
+type ContentKind = 'movie' | 'tv';
+type DeckSize = 10 | 20 | 50 | 100;
 
 type MovieLite = {
   id: number;
@@ -20,6 +22,28 @@ type MovieLite = {
   poster?: string | null;
   genre_ids?: number[];
 };
+
+type ServicePrefs = { netflix: boolean; prime: boolean };
+type UserPrefs = {
+  kind: ContentKind;
+  services: ServicePrefs;
+  deckSize: DeckSize;
+};
+
+const defaultPrefs: UserPrefs = {
+  kind: 'movie',
+  services: { netflix: true, prime: true },
+  deckSize: 20,
+};
+
+const TMDB_CONFIG = {
+  region: 'GB',
+  monetization: 'flatrate',
+  providerIds: { netflix: 8, prime: 9 },
+  minVoteCount: 50,
+  language: 'en-GB',
+  sortBy: 'popularity.desc',
+} as const;
 
 const IMG = 'https://image.tmdb.org/t/p/w780';
 const okUrl = (u?: string | null) => /^https?:\/\//i.test(u?.trim?.() || '');
@@ -106,14 +130,28 @@ function runTests() {
 }
 
 // ===== UI bits =====
-const WinnerCard = ({ movie, tmdbUrl }: { movie: any; tmdbUrl: string }) => {
+const WinnerCard = ({
+  movie,
+  tmdbUrl,
+  kind,
+}: {
+  movie: any;
+  tmdbUrl: string;
+  kind: ContentKind;
+}) => {
   const poster = movie?.poster_path ? IMG + movie.poster_path : null;
+  const title =
+    (kind === 'movie' ? movie?.title : movie?.name) || 'Untitled';
+  const yearSource =
+    kind === 'movie' ? movie?.release_date : movie?.first_air_date;
+  const year = yearSource ? String(yearSource).slice(0, 4) : '';
+
   return (
     <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[680px] flex flex-col overflow-hidden text-center">
       {poster ? (
         <img
           src={poster}
-          alt={movie.title}
+          alt={title}
           className="w-2/3 mx-auto aspect-[2/3] rounded-lg mb-4 overflow-hidden border border-neutral-800 bg-neutral-800/50 object-cover"
         />
       ) : (
@@ -124,12 +162,8 @@ const WinnerCard = ({ movie, tmdbUrl }: { movie: any; tmdbUrl: string }) => {
       <div className="flex-1 min-h-0 flex flex-col justify-between">
         <div>
           <h2 className="text-lg font-semibold mb-1">
-            {movie.title}{' '}
-            {movie.release_date && (
-              <span className="text-neutral-400">
-                ({String(movie.release_date).slice(0, 4)})
-              </span>
-            )}
+            {title}{' '}
+            {year && <span className="text-neutral-400">({year})</span>}
           </h2>
           <p className="text-sm text-neutral-300 mb-2 whitespace-pre-wrap break-words flex-1 basis-0 min-h-16 overflow-y-auto pr-1">
             {movie.tagline || movie.overview || 'No synopsis available.'}
@@ -270,11 +304,13 @@ const TrailerReview = ({
   user,
   token,
   ids: onIds,
+  kind,
   onDone,
 }: {
   user: User;
   token: string;
   ids: number[] | undefined;
+  kind: ContentKind;
   onDone: (ids: number[]) => void;
 }) => {
   const ids = Array.isArray(onIds) ? onIds : [];
@@ -298,14 +334,15 @@ const TrailerReview = ({
     if (!id) return;
     (async () => {
       try {
+        const base = kind === 'movie' ? 'movie' : 'tv';
         const m = await fetch(
-          `https://api.themoviedb.org/3/movie/${id}?language=en-GB`,
+          `https://api.themoviedb.org/3/${base}/${id}?language=${TMDB_CONFIG.language}`,
           { headers: { Authorization: `Bearer ${token}` } },
         ).then((r) => r.json());
         if (!live) return;
         setMeta(m || null);
         const v = await fetch(
-          `https://api.themoviedb.org/3/movie/${id}/videos?language=en-GB`,
+          `https://api.themoviedb.org/3/${base}/${id}/videos?language=${TMDB_CONFIG.language}`,
           { headers: { Authorization: `Bearer ${token}` } },
         ).then((r) => (r.ok ? r.json() : { results: [] }));
         const key = chooseBestYT(v.results || []);
@@ -317,14 +354,18 @@ const TrailerReview = ({
     return () => {
       live = false;
     };
-  }, [id, token]);
+  }, [id, token, kind]);
 
   if (!ids.length)
     return <div className="text-center py-20 text-neutral-400">No titles to review.</div>;
 
+  const rawTitle =
+    kind === 'movie' ? meta?.title : meta?.name;
+  const title = (rawTitle || '').trim();
+  const rawDate =
+    kind === 'movie' ? meta?.release_date : meta?.first_air_date;
+  const rel = rawDate ? `(${String(rawDate).slice(0, 4)})` : '';
   const poster = meta?.poster_path ? IMG + meta.poster_path : null;
-  const title = (meta?.title || '').trim();
-  const rel = meta?.release_date ? `(${String(meta.release_date).slice(0, 4)})` : '';
   const desc = (meta?.tagline || meta?.overview || '').trim();
   const ytWatch =
     tr && tr !== 'none'
@@ -566,10 +607,12 @@ const TrailerReview = ({
 const Results = ({
   agreedIds,
   token,
+  kind,
   heading = 'Agreed Picks',
 }: {
   agreedIds: number[];
   token: string;
+  kind: ContentKind;
   heading?: string;
 }) => {
   const [items, setItems] = useState<any[]>([]);
@@ -578,11 +621,12 @@ const Results = ({
 
   useEffect(() => {
     (async () => {
+      const base = kind === 'movie' ? 'movie' : 'tv';
       const out = await Promise.all(
         agreedIds.map(async (id) => {
           try {
             const r = await fetch(
-              `https://api.themoviedb.org/3/movie/${id}?language=en-GB`,
+              `https://api.themoviedb.org/3/${base}/${id}?language=${TMDB_CONFIG.language}`,
               { headers: { Authorization: `Bearer ${token}` } },
             );
             return r.ok ? await r.json() : null;
@@ -593,7 +637,7 @@ const Results = ({
       );
       setItems((out.filter(Boolean) as any[]) || []);
     })();
-  }, [agreedIds, token]);
+  }, [agreedIds, token, kind]);
 
   const load = async (id: number) => {
     if (trailers[id]) {
@@ -601,8 +645,9 @@ const Results = ({
       return;
     }
     try {
+      const base = kind === 'movie' ? 'movie' : 'tv';
       const r = await fetch(
-        `https://api.themoviedb.org/3/movie/${id}/videos?language=en-GB`,
+        `https://api.themoviedb.org/3/${base}/${id}/videos?language=${TMDB_CONFIG.language}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const d = r.ok ? await r.json() : { results: [] };
@@ -618,6 +663,8 @@ const Results = ({
   if (!agreedIds.length)
     return <div className="text-center text-neutral-400">No agreed picks yet.</div>;
 
+  const tmdbSection = kind === 'movie' ? 'movie' : 'tv';
+
   return (
     <div>
       <h2 className="text-lg font-semibold mb-4">
@@ -626,13 +673,14 @@ const Results = ({
       <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((m: any) => {
           const poster = m.poster_path ? IMG + m.poster_path : null;
-          const tmdb = `https://www.themoviedb.org/movie/${m.id}`;
+          const tmdb = `https://www.themoviedb.org/${tmdbSection}/${m.id}`;
           const k = trailers[m.id];
+          const displayTitle = (kind === 'movie' ? m.title : m.name) || '';
           const yt =
             k && k !== 'none'
               ? `https://www.youtube.com/watch?v=${k}`
               : `https://www.youtube.com/results?search_query=${encodeURIComponent(
-                  (m.title || '') + ' trailer',
+                  displayTitle + ' trailer',
                 )}`;
           return (
             <li
@@ -643,7 +691,7 @@ const Results = ({
                 {poster ? (
                   <img
                     src={poster}
-                    alt={m.title}
+                    alt={displayTitle}
                     className="w-12 h-18 object-cover rounded-md border border-neutral-800"
                   />
                 ) : (
@@ -652,7 +700,7 @@ const Results = ({
                   </div>
                 )}
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{m.title}</div>
+                  <div className="text-sm font-medium">{displayTitle}</div>
                   <div className="text-xs text-neutral-400 line-clamp-2">
                     {m.tagline || m.overview}
                   </div>
@@ -697,11 +745,13 @@ const Results = ({
 const Winner = ({
   id,
   token,
+  kind,
   onBack,
   onRestart,
 }: {
   id: number;
   token: string;
+  kind: ContentKind;
   onBack: () => void;
   onRestart: () => void;
 }) => {
@@ -710,8 +760,9 @@ const Winner = ({
     let live = true;
     (async () => {
       try {
+        const base = kind === 'movie' ? 'movie' : 'tv';
         const r = await fetch(
-          `https://api.themoviedb.org/3/movie/${id}?language=en-GB`,
+          `https://api.themoviedb.org/3/${base}/${id}?language=${TMDB_CONFIG.language}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         const j = await r.json();
@@ -721,15 +772,21 @@ const Winner = ({
     return () => {
       live = false;
     };
-  }, [id, token]);
+  }, [id, token, kind]);
 
   if (!m)
     return <div className="text-center py-20 text-neutral-400">Choosing a winner…</div>;
 
+  const tmdbSection = kind === 'movie' ? 'movie' : 'tv';
+
   return (
     <div className="max-w-md mx-auto text-center">
       <h2 className="text-xl font-semibold mb-3">Tonight's pick</h2>
-      <WinnerCard movie={m} tmdbUrl={`https://www.themoviedb.org/movie/${m.id}`} />
+      <WinnerCard
+        movie={m}
+        tmdbUrl={`https://www.themoviedb.org/${tmdbSection}/${m.id}`}
+        kind={kind}
+      />
       <div className="mt-3 flex justify-center gap-3">
         <button
           onClick={onBack}
@@ -750,15 +807,35 @@ const Winner = ({
 
 // ===== Root App =====
 export default function App() {
-  const prefs = {
-    region: 'GB',
-    monetization: 'flatrate',
-    providerIds: { netflix: 8, prime: 9 },
-    minVoteCount: 50,
-    language: 'en-GB',
-    sortBy: 'popularity.desc',
-    targetCount: 10,
-  } as const;
+  const [userPrefs, setUserPrefs] = useState<UserPrefs>(() => {
+    try {
+      const raw = localStorage.getItem('cs_prefs');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const kind: ContentKind =
+          parsed?.kind === 'tv' ? 'tv' : 'movie';
+        const deckSize: DeckSize =
+          parsed?.deckSize === 10 ||
+          parsed?.deckSize === 20 ||
+          parsed?.deckSize === 50 ||
+          parsed?.deckSize === 100
+            ? parsed.deckSize
+            : defaultPrefs.deckSize;
+        const services: ServicePrefs = {
+          netflix:
+            typeof parsed?.services?.netflix === 'boolean'
+              ? parsed.services.netflix
+              : true,
+          prime:
+            typeof parsed?.services?.prime === 'boolean'
+              ? parsed.services.prime
+              : true,
+        };
+        return { kind, deckSize, services };
+      }
+    } catch {}
+    return defaultPrefs;
+  });
 
   const [token, setToken] = useState(
     () =>
@@ -769,7 +846,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [deck, setDeck] = useState<number>(prefs.targetCount);
+  const [deck, setDeck] = useState<number>(userPrefs.deckSize);
   const [ban, setBan] = useState<Set<number>>(new Set());
   const [genres, setGenres] = useState<{ id: number; name: string }[]>([]);
   const [names, setNames] = useState<Record<User, string>>(() => {
@@ -781,8 +858,10 @@ export default function App() {
   });
   const [s, setS] = useState({
     user: 'You' as User,
-    phase: 'welcome' as
+    phase:
+      'welcome' as
       | 'welcome'
+      | 'prefs'
       | 'preDeal'
       | 'idle'
       | 'round1'
@@ -812,21 +891,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('cs_prefs', JSON.stringify(userPrefs));
+    } catch {}
+  }, [userPrefs]);
+
+  useEffect(() => {
     if (!token) return;
+    const path = userPrefs.kind === 'movie' ? 'movie' : 'tv';
     fetch(
-      `https://api.themoviedb.org/3/genre/movie/list?language=${prefs.language}`,
+      `https://api.themoviedb.org/3/genre/${path}/list?language=${TMDB_CONFIG.language}`,
       { headers: { Authorization: `Bearer ${token}` } },
     )
       .then((r) => r.json())
       .then((j) => setGenres(j.genres || []))
       .catch(() => {});
-  }, [token]);
+  }, [token, userPrefs.kind]);
 
   async function buildDeck(size?: number) {
     if (!token) {
       setError('Please enter your TMDB token above.');
       return;
     }
+    const providerIds: number[] = [];
+    if (userPrefs.services.netflix) providerIds.push(TMDB_CONFIG.providerIds.netflix);
+    if (userPrefs.services.prime) providerIds.push(TMDB_CONFIG.providerIds.prime);
+    if (!providerIds.length) {
+      setError('Choose at least one streaming service in preferences.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setNotice('');
@@ -835,13 +929,16 @@ export default function App() {
       const out: any[] = [];
       const seen = new Set<number>();
       let page = 1;
+      const base = userPrefs.kind === 'movie' ? 'movie' : 'tv';
+      const providersParam = providerIds.join('|');
+
       while (out.length < target) {
         const url =
-          `https://api.themoviedb.org/3/discover/movie?watch_region=${prefs.region}` +
-          `&include_adult=false&sort_by=${prefs.sortBy}&page=${page}` +
-          `&with_watch_providers=${prefs.providerIds.netflix}|${prefs.providerIds.prime}` +
-          `&with_watch_monetization_types=${prefs.monetization}` +
-          `&vote_count.gte=${prefs.minVoteCount}`;
+          `https://api.themoviedb.org/3/discover/${base}?watch_region=${TMDB_CONFIG.region}` +
+          `&include_adult=false&sort_by=${TMDB_CONFIG.sortBy}&page=${page}` +
+          `&with_watch_providers=${providersParam}` +
+          `&with_watch_monetization_types=${TMDB_CONFIG.monetization}` +
+          `&vote_count.gte=${TMDB_CONFIG.minVoteCount}`;
         const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) throw new Error('TMDB fetch failed: ' + r.status);
         const d = await r.json();
@@ -859,14 +956,19 @@ export default function App() {
         if (page >= tp || rs.length === 0) break;
         page += 1;
       }
-      const cohort: MovieLite[] = out.slice(0, target).map((m: any) => ({
-        id: m.id,
-        title: m.title,
-        overview: m.overview,
-        year: (m.release_date || '').slice(0, 4),
-        poster: m.poster_path ? IMG + m.poster_path : null,
-        genre_ids: m.genre_ids,
-      }));
+      const cohort: MovieLite[] = out.slice(0, target).map((m: any) => {
+        const title = userPrefs.kind === 'movie' ? m.title : m.name;
+        const date =
+          userPrefs.kind === 'movie' ? m.release_date : m.first_air_date;
+        return {
+          id: m.id,
+          title: title,
+          overview: m.overview,
+          year: (date || '').slice(0, 4),
+          poster: m.poster_path ? IMG + m.poster_path : null,
+          genre_ids: m.genre_ids,
+        };
+      });
       setReviewYes({ You: new Set(), Partner: new Set() });
       setWin(null);
       setS((v) => ({
@@ -972,7 +1074,7 @@ export default function App() {
   const expand = () => {
     const nx = Math.min(deck + 10, 200);
     setDeck(nx);
-    setNotice(`No matches this round — expanding deck to ${nx} and dealing again…`);
+    setNotice(`No matches this round — expanding options to ${nx} and dealing again…`);
     setTimeout(() => buildDeck(nx), 0);
   };
   const fresh = () => {
@@ -993,13 +1095,13 @@ export default function App() {
       passes: { You: new Set(), Partner: new Set() },
       agreed: [],
     });
-    setNotice('Starting over with a fresh set of movies…');
-    setTimeout(() => buildDeck(prefs.targetCount), 0);
+    setNotice('Starting over with a fresh set of options…');
+    setTimeout(() => buildDeck(userPrefs.deckSize), 0);
   };
   const restart = () => {
     setWin(null);
     setNotice('');
-    setDeck(prefs.targetCount);
+    setDeck(userPrefs.deckSize);
     setBan(new Set());
     setS({
       user: 'You',
@@ -1012,14 +1114,40 @@ export default function App() {
     });
   };
 
+  const updatePrefs = (patch: Partial<UserPrefs>) => {
+    setUserPrefs((prev) => {
+      const next = { ...prev, ...patch } as UserPrefs;
+      return next;
+    });
+  };
+
+  // header summary
+  const typeLabel =
+    userPrefs.kind === 'movie' ? 'Movies' : 'TV shows';
+  const servicesLabel = (() => {
+    const parts: string[] = [];
+    if (userPrefs.services.netflix) parts.push('Netflix');
+    if (userPrefs.services.prime) parts.push('Prime Video');
+    if (!parts.length) return 'No service selected';
+    return parts.join(' + ');
+  })();
+
+  const servicesValid =
+    userPrefs.services.netflix || userPrefs.services.prime;
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
-      <header className="border-b border-neutral-800 pb-2 mb-4 flex items-center gap-2">
+      <header className="border-b border-neutral-800 pb-2 mb-4 flex flex-wrap items-center gap-2">
         <span>
           <I.F />
         </span>
         <h1 className="font-semibold">CoupleSwipe</h1>
-        <span className="text-xs text-neutral-400">UK Netflix & Prime Picker</span>
+        <span className="text-xs text-neutral-400">
+          Streaming Picker (UK)
+        </span>
+        <span className="text-[11px] text-neutral-500 ml-2 hidden sm:inline">
+          {typeLabel} · {servicesLabel} · {deck} options
+        </span>
         <div className="ml-auto flex items-center gap-2">
           {(names.You || names.Partner) && (
             <span className="text-xs text-neutral-400 hidden sm:inline">
@@ -1056,11 +1184,11 @@ export default function App() {
       {notice && <div className="text-blue-300 mb-4">{notice}</div>}
 
       {loading ? (
-        <div className="text-center py-20 text-neutral-400">Loading deck...</div>
+        <div className="text-center py-20 text-neutral-400">Loading options...</div>
       ) : s.phase === 'welcome' ? (
         <div className="max-w-md mx-auto text-center py-10">
           <h2 className="text-xl font-semibold mb-3">
-            Need help choosing a movie that you both want to watch?
+            Need help choosing something you both want to watch?
           </h2>
           <p className="text-sm text-neutral-300 mb-6">Start by entering your names:</p>
           <div className="space-y-3 text-left">
@@ -1098,7 +1226,7 @@ export default function App() {
                 setS((v) => ({
                   ...v,
                   user: Math.random() < 0.5 ? 'You' : 'Partner',
-                  phase: 'preDeal',
+                  phase: 'prefs',
                 }));
               }}
               className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white"
@@ -1118,6 +1246,139 @@ export default function App() {
                 Clear names
               </button>
             )}
+          </div>
+        </div>
+      ) : s.phase === 'prefs' ? (
+        <div className="max-w-md mx-auto py-8">
+          <h2 className="text-xl font-semibold mb-2 text-center">
+            Choose what to swipe through tonight
+          </h2>
+          <p className="text-sm text-neutral-300 mb-6 text-center">
+            These preferences will be remembered for next time.
+          </p>
+
+          {/* Services */}
+          <div className="mb-5">
+            <h3 className="text-sm font-medium mb-2">Where do you watch?</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() =>
+                  updatePrefs({
+                    services: {
+                      ...userPrefs.services,
+                      netflix: !userPrefs.services.netflix,
+                    },
+                  })
+                }
+                className={`flex-1 px-3 py-2 rounded-xl border text-sm ${
+                  userPrefs.services.netflix
+                    ? 'bg-red-600/80 border-red-500 text-white'
+                    : 'bg-neutral-900 border-neutral-700 text-neutral-200'
+                }`}
+              >
+                Netflix
+              </button>
+              <button
+                onClick={() =>
+                  updatePrefs({
+                    services: {
+                      ...userPrefs.services,
+                      prime: !userPrefs.services.prime,
+                    },
+                  })
+                }
+                className={`flex-1 px-3 py-2 rounded-xl border text-sm ${
+                  userPrefs.services.prime
+                    ? 'bg-blue-600/80 border-blue-500 text-white'
+                    : 'bg-neutral-900 border-neutral-700 text-neutral-200'
+                }`}
+              >
+                Prime Video
+              </button>
+            </div>
+            {!servicesValid && (
+              <p className="text-xs text-red-300 mt-1">
+                Select at least one service.
+              </p>
+            )}
+          </div>
+
+          {/* Type */}
+          <div className="mb-5">
+            <h3 className="text-sm font-medium mb-2">
+              What are you in the mood for?
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => updatePrefs({ kind: 'movie' })}
+                className={`flex-1 px-3 py-2 rounded-xl border text-sm ${
+                  userPrefs.kind === 'movie'
+                    ? 'bg-neutral-100 text-neutral-900 border-neutral-100'
+                    : 'bg-neutral-900 border-neutral-700 text-neutral-200'
+                }`}
+              >
+                Movies
+              </button>
+              <button
+                onClick={() => updatePrefs({ kind: 'tv' })}
+                className={`flex-1 px-3 py-2 rounded-xl border text-sm ${
+                  userPrefs.kind === 'tv'
+                    ? 'bg-neutral-100 text-neutral-900 border-neutral-100'
+                    : 'bg-neutral-900 border-neutral-700 text-neutral-200'
+                }`}
+              >
+                TV shows
+              </button>
+            </div>
+          </div>
+
+          {/* Deck size */}
+          <div className="mb-6">
+            <h3 className="text-sm font-medium mb-2">How many options?</h3>
+            <div className="grid grid-cols-4 gap-2">
+              {[10, 20, 50, 100].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    updatePrefs({ deckSize: n as DeckSize });
+                    setDeck(n);
+                  }}
+                  className={`px-2 py-2 rounded-xl border text-sm ${
+                    userPrefs.deckSize === n
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-neutral-900 border-neutral-700 text-neutral-200'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center mt-4">
+            <button
+              onClick={() =>
+                setS((v) => ({
+                  ...v,
+                  phase: 'welcome',
+                }))
+              }
+              className="text-xs text-neutral-400 underline"
+            >
+              Back
+            </button>
+            <button
+              onClick={() =>
+                setS((v) => ({
+                  ...v,
+                  phase: 'preDeal',
+                }))
+              }
+              disabled={!servicesValid}
+              className="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Continue
+            </button>
           </div>
         </div>
       ) : s.phase === 'preDeal' ? (
@@ -1165,7 +1426,7 @@ export default function App() {
         <div className="text-center py-12">
           <h2 className="text-xl font-semibold mb-2">Great news!</h2>
           <p className="text-sm text-neutral-300">
-            You both like the look of <strong>{s.agreed.length}</strong> movie
+            You both like the look of <strong>{s.agreed.length}</strong> option
             {s.agreed.length === 1 ? '' : 's'}.
           </p>
           <p className="text-sm text-neutral-300 mt-2 mb-6">
@@ -1184,6 +1445,7 @@ export default function App() {
           user={s.user}
           token={token}
           ids={s.agreed}
+          kind={userPrefs.kind}
           onDone={(ids) => reviewDone(s.user, ids)}
         />
       ) : s.phase === 'reviewSwap' ? (
@@ -1215,13 +1477,14 @@ export default function App() {
           user={s.user}
           token={token}
           ids={s.agreed}
+          kind={userPrefs.kind}
           onDone={(ids) => reviewDone(s.user, ids)}
         />
       ) : s.phase === 'noAgreed' ? (
         <div className="text-center">
           <p className="mb-3">No agreed picks this round</p>
           <p className="text-sm text-neutral-300 mb-4">
-            You didn't both swipe thumbs-up on the same title. We'll add more movies to
+            You didn't both swipe thumbs-up on the same title. We'll add more options to
             widen the pool and deal again.
           </p>
           <div className="flex justify-center gap-3">
@@ -1241,7 +1504,12 @@ export default function App() {
         </div>
       ) : s.phase === 'final' ? (
         <div>
-          <Results agreedIds={s.agreed} token={token} heading="Final agreed picks" />
+          <Results
+            agreedIds={s.agreed}
+            token={token}
+            kind={userPrefs.kind}
+            heading="Final agreed picks"
+          />
           <div className="mt-6 p-4 rounded-2xl border border-neutral-800 bg-neutral-900/50 text-center">
             <p className="mb-3 text-sm text-neutral-300">
               You both liked all these! I'll pick the winner for you
@@ -1259,13 +1527,14 @@ export default function App() {
         <Winner
           id={win}
           token={token}
+          kind={userPrefs.kind}
           onBack={() => setS((v) => ({ ...v, phase: 'final' }))}
           onRestart={restart}
         />
       ) : s.phase === 'startOver' ? (
         <div className="text-center py-16">
           <h2 className="text-lg font-semibold mb-2">
-            You haven't found the perfect movie yet, try again
+            You haven't found the perfect thing yet, try again
           </h2>
           <p className="text-sm text-neutral-300 mb-6">
             We'll start over with a completely fresh set and hide everything you've
@@ -1280,7 +1549,7 @@ export default function App() {
         </div>
       ) : !cur ? (
         <div className="text-center py-20 text-neutral-400">
-          Click Build Deck to begin
+          Click Build {deck} to begin
         </div>
       ) : (
         <div className="text-center">
