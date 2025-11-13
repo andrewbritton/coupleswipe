@@ -495,8 +495,12 @@ const TrailerReview = ({
               >
                 <div className="w-screen">
                   {embedError ? (
+                    // Explicit error case (desktop / browsers that fire onError)
                     <div className="px-4 py-6 text-center">
-                      <p className="text-sm text-neutral-100 mb-3">{embedError}</p>
+                      <p className="text-sm text-neutral-100 mb-3">
+                        {embedError ||
+                          "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled)."}
+                      </p>
                       <a
                         href={ytWatch}
                         target="_blank"
@@ -507,19 +511,34 @@ const TrailerReview = ({
                       </a>
                     </div>
                   ) : (
-                    <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
-                      <iframe
-                        className="absolute inset-0 w-full h-full z-[60]"
-                        src={ytEmbed}
-                        title={title || 'Trailer'}
-                        allow="autoplay; encrypted-media; picture-in-picture"
-                        allowFullScreen
-                        onError={() =>
-                          setEmbedError(
-                            "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
-                          )
-                        }
-                      />
+                    // Normal case: show iframe *and* always show a YouTube fallback below
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
+                        <iframe
+                          className="absolute inset-0 w-full h-full z-[60]"
+                          src={ytEmbed}
+                          title={title || 'Trailer'}
+                          allow="autoplay; encrypted-media; picture-in-picture"
+                          allowFullScreen
+                          onError={() =>
+                            setEmbedError(
+                              "YouTube won't let this trailer play inside the app (for example, age-restricted or embedding disabled).",
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="mt-3 px-4 text-center text-xs text-neutral-100">
+                        If the trailer doesn&apos;t play properly on your device (especially
+                        on mobile), tap below to watch it directly on YouTube.
+                      </div>
+                      <a
+                        href={ytWatch}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white"
+                      >
+                        Watch on YouTube
+                      </a>
                     </div>
                   )}
                 </div>
@@ -1306,4 +1325,3 @@ export default function App() {
     </div>
   );
 }
-
