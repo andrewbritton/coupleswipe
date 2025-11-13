@@ -227,7 +227,6 @@ const TrailerReview = ({ user, token, ids: onIds, onDone }: { user: User; token:
     }
   };
   const end = () => {
-    if (playing) return;
     const d = swipeDir(dx, 64);
     if (d) {
       next(d === 'right');
@@ -237,7 +236,7 @@ const TrailerReview = ({ user, token, ids: onIds, onDone }: { user: User; token:
     setStart(null);
   };
   const move = (x: number) => {
-    if (playing || start == null) return;
+    if (start == null) return;
     setDx(x - start);
   };
   return (
@@ -248,14 +247,13 @@ const TrailerReview = ({ user, token, ids: onIds, onDone }: { user: User; token:
       <div
         className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/50 max-w-md mx-auto h-[720px] flex flex-col overflow-hidden select-none"
         onTouchStart={(e) => {
-          if (playing) return;
           setStart(e.touches[0].clientX);
           setDrag(true);
         }}
         onTouchMove={(e) => move(e.touches[0].clientX)}
         onTouchEnd={end}
         onMouseDown={(e) => {
-          if (playing || e.button !== 0) return;
+          if (e.button !== 0) return;
           setStart(e.clientX);
           setDrag(true);
         }}
@@ -312,16 +310,35 @@ const TrailerReview = ({ user, token, ids: onIds, onDone }: { user: User; token:
               <button
                 aria-label="Close trailer"
                 onClick={() => setPlaying(false)}
-                className="absolute top-3 right-3 z-[60] px-3 py-1.5 rounded-lg bg-neutral-900/80 border border-neutral-700 text-sm"
+                className="absolute top-3 right-3 z-[70] px-3 py-1.5 rounded-lg bg-neutral-900/80 border border-neutral-700 text-sm"
               >
                 <I.X /> Close
               </button>
+              {/* swipe capture rails (allow swipe while video plays) */}
+              <div
+                className="absolute inset-y-0 left-0 w-[22%] z-[70] cursor-ew-resize"
+                onTouchStart={(e) => { setStart(e.touches[0].clientX); setDrag(true); }}
+                onTouchMove={(e) => move(e.touches[0].clientX)}
+                onTouchEnd={end}
+                onMouseDown={(e) => { if (e.button!==0) return; setStart(e.clientX); setDrag(true); }}
+                onMouseMove={(e) => { if (start!=null) move(e.clientX); }}
+                onMouseUp={end}
+              />
+              <div
+                className="absolute inset-y-0 right-0 w-[22%] z-[70] cursor-ew-resize"
+                onTouchStart={(e) => { setStart(e.touches[0].clientX); setDrag(true); }}
+                onTouchMove={(e) => move(e.touches[0].clientX)}
+                onTouchEnd={end}
+                onMouseDown={(e) => { if (e.button!==0) return; setStart(e.clientX); setDrag(true); }}
+                onMouseMove={(e) => { if (start!=null) move(e.clientX); }}
+                onMouseUp={end}
+              />
               {/* full-viewport responsive 16:9 player pinned near top for immediate visibility on mobile */}
               <div className="absolute inset-x-0 top-0 flex justify-center" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
                 <div className="w-screen">
                   <div className="relative w-full" style={{ paddingTop: '56.25%' }}>
                     <iframe
-                      className="absolute inset-0 w-full h-full"
+                      className="absolute inset-0 w-full h-full z-[60]"
                       src={ytEmbed}
                       title={title || 'Trailer'}
                       allow="autoplay; encrypted-media; picture-in-picture"
